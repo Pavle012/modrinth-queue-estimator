@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modrinth Queue Oracle</title>
+    <title>Modrinth Queue Estimator</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 </head>
 <body class="bg-[#0b0b0e]">
@@ -18,13 +18,13 @@
 
     const API_BASE = "https://api.modrinth.com/v2";
     const PROJECT_TYPES = [
-      { id: 'mod', label: 'Mods', icon: '🧩' },
-      { id: 'plugin', label: 'Plugins', icon: '⚙️' },
-      { id: 'datapack', label: 'Datapacks', icon: '💾' },
-      { id: 'shader', label: 'Shaders', icon: '☀️' },
-      { id: 'resourcepack', label: 'Resource Packs', icon: '🎨' },
-      { id: 'modpack', label: 'Modpacks', icon: '📦' },
-      { id: 'server', label: 'Servers', icon: '🖥️' }
+      { id: 'mod', label: 'Mods', icon: '' },
+      { id: 'plugin', label: 'Plugins', icon: '' },
+      { id: 'datapack', label: 'Datapacks', icon: '' },
+      { id: 'shader', label: 'Shaders', icon: '' },
+      { id: 'resourcepack', label: 'Resource Packs', icon: '' },
+      { id: 'modpack', label: 'Modpacks', icon: '' },
+      { id: 'server', label: 'Servers', icon: '' }
     ];
 
     const App = () => {
@@ -108,10 +108,9 @@
         return React.createElement('div', { className: "min-h-screen bg-[#0b0b0e] text-slate-300 flex items-center justify-center p-6 font-sans" },
           React.createElement('div', { className: "max-w-xl w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl" },
             React.createElement('div', { className: "flex items-center gap-3 mb-8 justify-center" },
-              React.createElement('span', { className: "text-3xl" }, "🔮"),
               React.createElement('h1', { className: "text-3xl font-black text-white tracking-tighter" },
                 "Queue",
-                React.createElement('span', { className: "text-blue-500" }, "Oracle")
+                React.createElement('span', { className: "text-blue-500" }, "Estimator")
               )
             ),
             React.createElement('div', { className: "space-y-6" },
@@ -133,7 +132,6 @@
                       onClick: () => setSelectedType(type.id),
                       className: `p-3 rounded-xl border flex items-center gap-2 transition-all ${selectedType === type.id ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-400'}`
                     },
-                      React.createElement('span', { className: "text-lg" }, type.icon),
                       React.createElement('span', { className: "text-xs font-bold truncate" }, type.label)
                     )
                   )
@@ -147,7 +145,7 @@
                 React.createElement('button', {
                   onClick: handleStart,
                   className: "flex-[2] bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-900/20"
-                }, "🚀 Analyze Queue")
+                }, "Analyze Queue")
               )
             )
           )
@@ -158,7 +156,7 @@
         React.createElement('div', { className: "max-w-5xl mx-auto space-y-6" },
           React.createElement('header', { className: "flex flex-wrap items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-4" },
             React.createElement('div', { className: "flex items-center gap-4" },
-              React.createElement('button', { onClick: () => setView('setup'), className: "p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors" }, "⬅️ Back"),
+              React.createElement('button', { onClick: () => setView('setup'), className: "p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors" }, "Back"),
               React.createElement('div', null,
                 React.createElement('h1', { className: "text-xl font-black text-white flex items-center gap-2" },
                   PROJECT_TYPES.find(t => t.id === selectedType)?.label,
@@ -166,10 +164,10 @@
                 )
               )
             ),
-            React.createElement('button', { onClick: fetchData, className: "bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-colors" }, "🔄 Refresh")
+            React.createElement('button', { onClick: fetchData, className: "bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-colors" }, "Refresh")
           ),
-          error && React.createElement('div', { className: "bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl flex items-center gap-3" }, `⚠️ ${error}`),
-          loading && !stats ? React.createElement('div', { className: "text-center py-20 animate-pulse text-slate-500 font-bold tracking-widest uppercase" }, "🚀 Crunching Modrinth API...") : stats ? React.createElement(React.Fragment, null,
+          error && React.createElement('div', { className: "bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl flex items-center gap-3" }, error),
+          loading && !stats ? React.createElement('div', { className: "text-center py-20 animate-pulse text-slate-500 font-bold tracking-widest uppercase" }, "Crunching Modrinth API...") : stats ? React.createElement(React.Fragment, null,
             React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" },
               React.createElement('div', { className: "bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-hidden" },
                 React.createElement('p', { className: "text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 relative z-10" }, "Avg Processing Time"),
