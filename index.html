@@ -102,11 +102,11 @@
           const details = await Promise.all(searchData.hits.map(async (hit) => {
             try {
               const pRes = await fetch(`${API_BASE}/project/${hit.project_id}`);
-              const pData = pRes.ok ? await pRes.json() : { published: hit.date_created };
+              const pData = pRes.ok ? await pRes.json() : { date_updated: hit.date_created };
               return {
                 id: hit.project_id,
                 title: hit.title,
-                queued: new Date(pData.published),
+                queued: new Date(pData.date_updated || pData.published),
                 approved: new Date(hit.date_created)
               };
             } catch {
@@ -131,8 +131,8 @@
 
           const currentQueueFront = new Date(Date.now() - medianWaitMillis);
           
-          // Calculate user project stats
-          const userQueuedDate = new Date(selectedProject.published);
+          // Calculate user project stats - use date_updated if available (for resubmissions)
+          const userQueuedDate = new Date(selectedProject.date_updated || selectedProject.published);
           const gapMillis = userQueuedDate.getTime() - currentQueueFront.getTime();
           const gapDays = gapMillis / (1000 * 60 * 60 * 24);
           const estimatedApproval = new Date(userQueuedDate.getTime() + medianWaitMillis);
@@ -198,7 +198,7 @@
                       React.createElement('div', { className: "font-bold text-white text-sm truncate" }, project.title),
                       React.createElement('div', { className: "text-xs text-slate-400 mt-2 space-y-1" },
                         React.createElement('div', null, `Type: ${project.project_type.charAt(0).toUpperCase() + project.project_type.slice(1)}`),
-                        React.createElement('div', null, `Submitted: ${new Date(project.published).toLocaleString()}`),
+                        React.createElement('div', null, `Submitted: ${new Date(project.date_updated || project.published).toLocaleString()}`),
                         React.createElement('div', { className: "text-slate-500" }, `Status: ${project.status}`)
                       )
                     )
@@ -231,7 +231,7 @@
                   React.createElement('span', { className: "text-blue-500 text-lg" }, "Analysis")
                 ),
                 React.createElement('p', { className: "text-xs text-slate-400 mt-1" },
-                  `${selectedProjectType?.charAt(0).toUpperCase() + selectedProjectType?.slice(1) || 'Project'} • Submitted ${new Date(selectedProject?.published).toLocaleDateString()}`
+                  `${selectedProjectType?.charAt(0).toUpperCase() + selectedProjectType?.slice(1) || 'Project'} • Submitted ${new Date(selectedProject?.date_updated || selectedProject?.published).toLocaleDateString()}`
                 )
               )
             )
