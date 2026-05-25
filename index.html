@@ -17,27 +17,19 @@
     const { useState, useEffect, useMemo } = React;
 
     const API_BASE = "https://api.modrinth.com/v2";
-    const PROJECT_TYPES = [
-      { id: 'mod', label: 'Mods', icon: '' },
-      { id: 'plugin', label: 'Plugins', icon: '' },
-      { id: 'datapack', label: 'Datapacks', icon: '' },
-      { id: 'shader', label: 'Shaders', icon: '' },
-      { id: 'resourcepack', label: 'Resource Packs', icon: '' },
-      { id: 'modpack', label: 'Modpacks', icon: '' },
-      { id: 'server', label: 'Servers', icon: '' }
-    ];
 
     const App = () => {
       const [view, setView] = useState('setup'); 
-      const [userDateStr, setUserDateStr] = useState('');
-      const [selectedType, setSelectedType] = useState('modpack');
       const [apiKey, setApiKey] = useState('');
       const [userProjects, setUserProjects] = useState([]);
-      const [selectedProjectId, setSelectedProjectId] = useState('');
+      const [selectedProject, setSelectedProject] = useState(null);
+      const [selectedProjectType, setSelectedProjectType] = useState(null);
       
-      const [projects, setProjects] = useState([]);
+      const [queueStats, setQueueStats] = useState(null);
+      const [userProjectStats, setUserProjectStats] = useState(null);
       const [loading, setLoading] = useState(false);
       const [loadingProjects, setLoadingProjects] = useState(false);
+      const [loadingAnalysis, setLoadingAnalysis] = useState(false);
       const [error, setError] = useState(null);
 
       const fetchUserProjects = async () => {
@@ -49,11 +41,8 @@
         setLoadingProjects(true);
         setError(null);
         try {
-          // First, get the authenticated user info
           const userRes = await fetch(`${API_BASE}/user`, {
-            headers: {
-              'Authorization': apiKey
-            }
+            headers: { 'Authorization': apiKey }
           });
 
           if (!userRes.ok) {
@@ -66,11 +55,8 @@
           const userData = await userRes.json();
           const userId = userData.id;
 
-          // Now fetch user's projects
           const response = await fetch(`${API_BASE}/user/${userId}/projects`, {
-            headers: {
-              'Authorization': apiKey
-            }
+            headers: { 'Authorization': apiKey }
           });
 
           if (!response.ok) {
@@ -78,30 +64,38 @@
           }
 
           const data = await response.json();
-          
-          // Filter for pending projects (status === 'processing' or 'rejected' or 'draft')
-          const pendingProjects = data.filter(p => p.status !== 'approved' && p.status !== 'published');
+          const pendingProjects = data.filter(p => p.status === 'processing' || p.status === 'under_review');
           
           if (pendingProjects.length === 0) {
             setError("No pending projects found. All your projects have been approved!");
-          }
-          
-          setUserProjects(pendingProjects);
-          if (pendingProjects.length > 0) {
-            setSelectedProjectId(pendingProjects[0].id);
+            setUserProjects([]);
+          } else {
+            setUserProjects(pendingProjects);
+            setSelectedProject(pendingProjects[0]);
+            setError(null);
           }
         } catch (err) {
           setError(err.message || "Failed to fetch user projects. Check your API key and try again.");
+          setUserProjects([]);
         } finally {
           setLoadingProjects(false);
         }
       };
 
-      const fetchData = async () => {
-        setLoading(true);
+      const analyzeSelectedProject = async () => {
+        if (!selectedProject) {
+          setError("Please select a project");
+          return;
+        }
+
+        setLoadingAnalysis(true);
         setError(null);
         try {
-          const searchRes = await fetch(`${API_BASE}/search?limit=20&index=newest&facets=[["project_type:${selectedType}"]]`);
+          const projectType = selectedProject.project_type;
+          setSelectedProjectType(projectType);
+
+          // Fetch queue stats for this project type
+          const searchRes = await fetch(`${API_BASE}/search?limit=50&index=newest&facets=[["project_type:${projectType}"]]`);
           if (!searchRes.ok) throw new Error("Search API failed");
           const searchData = await searchRes.json();
 
@@ -125,74 +119,44 @@
             }
           }));
 
-          setProjects(details.sort((a, b) => b.queued - a.queued));
-        } catch (err) {
-          setError("Rate limited or connection error. Try again in a sec.");
-        } finally {
-          setLoading(false);
-        }
-      };
+          const sortedProjects = details.sort((a, b) => b.queued - a.queued);
 
-      const handleStart = () => {
-        setView('dashboard');
-        fetchData();
-      };
+          if (sortedProjects.length < 2) {
+            throw new Error("Not enough data to calculate statistics");
+          }
 
-      const handleStartWithProject = async () => {
-        if (!selectedProjectId) {
-          setError("Please select a project");
-          return;
-        }
+          const waits = sortedProjects.map(p => p.approved.getTime() - p.queued.getTime()).sort((a, b) => a - b);
+          const medianWaitMillis = waits[Math.floor(waits.length / 2)];
+          const avgWaitDays = medianWaitMillis / (1000 * 60 * 60 * 24);
 
-        setLoading(true);
-        setError(null);
-        try {
-          const projectRes = await fetch(`${API_BASE}/project/${selectedProjectId}`, {
-            headers: apiKey ? { 'Authorization': apiKey } : {}
-          });
+          const currentQueueFront = new Date(Date.now() - medianWaitMillis);
           
-          if (!projectRes.ok) throw new Error("Failed to fetch project details");
-          const projectData = await projectRes.json();
-
-          // Set the queued date to the project's creation date
-          const queuedDate = new Date(projectData.published);
-          setUserDateStr(queuedDate.toISOString().slice(0, 16));
-          
-          setView('dashboard');
-          await fetchData();
-        } catch (err) {
-          setError("Failed to fetch project details. Try again.");
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      const stats = useMemo(() => {
-        if (projects.length < 2) return null;
-
-        const waits = projects.map(p => p.approved.getTime() - p.queued.getTime()).sort((a, b) => a - b);
-        const medianWaitMillis = waits[Math.floor(waits.length / 2)];
-        const avgWaitDays = medianWaitMillis / (1000 * 60 * 60 * 24);
-
-        const currentQueueFront = new Date(Date.now() - medianWaitMillis);
-        const currentLagDays = avgWaitDays;
-
-        let userStats = null;
-        if (userDateStr) {
-          const userDate = new Date(userDateStr);
-          const gapMillis = userDate.getTime() - currentQueueFront.getTime();
+          // Calculate user project stats
+          const userQueuedDate = new Date(selectedProject.published);
+          const gapMillis = userQueuedDate.getTime() - currentQueueFront.getTime();
           const gapDays = gapMillis / (1000 * 60 * 60 * 24);
-          const estimatedApproval = new Date(userDate.getTime() + medianWaitMillis);
-          
-          userStats = {
+          const estimatedApproval = new Date(userQueuedDate.getTime() + medianWaitMillis);
+
+          setQueueStats({
+            avgWaitDays,
+            currentQueueFront,
+            allProjects: sortedProjects
+          });
+
+          setUserProjectStats({
             gapDays,
             estimatedApproval,
-            isPassed: gapDays <= 0
-          };
-        }
+            isPassed: gapDays <= 0,
+            queuedDate: userQueuedDate
+          });
 
-        return { avgWaitDays, currentLagDays, currentQueueFront, userStats };
-      }, [projects, userDateStr]);
+          setView('dashboard');
+        } catch (err) {
+          setError(err.message || "Failed to analyze project. Try again.");
+        } finally {
+          setLoadingAnalysis(false);
+        }
+      };
 
       if (view === 'setup') {
         return React.createElement('div', { className: "min-h-screen bg-[#0b0b0e] text-slate-300 flex items-center justify-center p-6 font-sans" },
@@ -204,92 +168,52 @@
               )
             ),
             React.createElement('div', { className: "space-y-6" },
-              React.createElement('div', { className: "border-b border-slate-700 pb-6" },
-                React.createElement('h2', { className: "text-sm font-black uppercase tracking-wider text-slate-400 mb-4" }, "Option 1: Use Your API Key"),
-                React.createElement('div', { className: "space-y-3" },
-                  React.createElement('div', null,
-                    React.createElement('label', { className: "block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2" }, "Modrinth API Key"),
-                    React.createElement('input', {
-                      type: "password",
-                      value: apiKey,
-                      onChange: (e) => setApiKey(e.target.value),
-                      placeholder: "Paste your Modrinth API key here",
-                      className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:outline-none focus:border-blue-500 transition-colors text-sm"
-                    })
-                  ),
-                  React.createElement('p', { className: "text-xs text-slate-500" }, "Get your API key from your Modrinth account settings. This is used to fetch your pending projects."),
-                  React.createElement('button', {
-                    onClick: fetchUserProjects,
-                    disabled: loadingProjects || !apiKey.trim(),
-                    className: "w-full bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 text-sm transition-colors"
-                  }, loadingProjects ? "Loading projects..." : "Load My Pending Projects")
-                )
+              React.createElement('div', null,
+                React.createElement('label', { className: "block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2" }, "Modrinth API Key"),
+                React.createElement('input', {
+                  type: "password",
+                  value: apiKey,
+                  onChange: (e) => setApiKey(e.target.value),
+                  onKeyPress: (e) => e.key === 'Enter' && fetchUserProjects(),
+                  placeholder: "Paste your Modrinth API key here",
+                  className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:outline-none focus:border-blue-500 transition-colors text-sm"
+                })
               ),
-              userProjects.length > 0 && React.createElement('div', { className: "border-b border-slate-700 pb-6" },
-                React.createElement('label', { className: "block text-xs font-bold uppercase tracking-wider text-slate-400 mb-3" }, "Select a Pending Project"),
-                React.createElement('div', { className: "space-y-2 max-h-64 overflow-y-auto" },
+              React.createElement('p', { className: "text-xs text-slate-500" }, "Get your API key from your Modrinth account settings. Your key stays private and is never stored."),
+              React.createElement('button', {
+                onClick: fetchUserProjects,
+                disabled: loadingProjects || !apiKey.trim(),
+                className: "w-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 disabled:opacity-50 text-white px-4 py-3 rounded-lg font-bold flex items-center justify-center gap-2 text-sm transition-colors"
+              }, loadingProjects ? "Loading projects..." : "Load My Pending Projects"),
+              
+              userProjects.length > 0 && React.createElement('div', { className: "border-t border-slate-700 pt-6" },
+                React.createElement('label', { className: "block text-xs font-bold uppercase tracking-wider text-slate-400 mb-3" }, "Select a Project to Analyze"),
+                React.createElement('div', { className: "space-y-2 max-h-96 overflow-y-auto" },
                   userProjects.map(project =>
                     React.createElement('button', {
                       key: project.id,
-                      onClick: () => setSelectedProjectId(project.id),
-                      className: `w-full text-left p-3 rounded-xl border transition-all ${selectedProjectId === project.id ? 'bg-blue-600/20 border-blue-500' : 'bg-slate-950 border-slate-800 hover:border-slate-700'}`
+                      onClick: () => setSelectedProject(project),
+                      className: `w-full text-left p-4 rounded-xl border transition-all ${selectedProject?.id === project.id ? 'bg-blue-600/20 border-blue-500' : 'bg-slate-950 border-slate-800 hover:border-slate-700'}`
                     },
                       React.createElement('div', { className: "font-bold text-white text-sm truncate" }, project.title),
-                      React.createElement('div', { className: "text-xs text-slate-400 mt-1" },
-                        `Status: ${project.status} • Submitted: ${new Date(project.published).toLocaleDateString()}`
+                      React.createElement('div', { className: "text-xs text-slate-400 mt-2 space-y-1" },
+                        React.createElement('div', null, `Type: ${project.project_type.charAt(0).toUpperCase() + project.project_type.slice(1)}`),
+                        React.createElement('div', null, `Submitted: ${new Date(project.published).toLocaleString()}`),
+                        React.createElement('div', { className: "text-slate-500" }, `Status: ${project.status}`)
                       )
                     )
                   )
-                )
+                ),
+                React.createElement('button', {
+                  onClick: analyzeSelectedProject,
+                  disabled: !selectedProject || loadingAnalysis,
+                  className: "w-full mt-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900 disabled:opacity-50 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20"
+                }, loadingAnalysis ? "Analyzing..." : "📊 Analyze Selected Project")
               ),
-              React.createElement('div', { className: "border-b border-slate-700 pb-6" },
-                React.createElement('h2', { className: "text-sm font-black uppercase tracking-wider text-slate-400 mb-4" }, "Option 2: Manual Setup"),
-                React.createElement('div', { className: "space-y-3" },
-                  React.createElement('div', null,
-                    React.createElement('label', { className: "block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2" }, "When did you queue it? (Optional)"),
-                    React.createElement('input', {
-                      type: "datetime-local",
-                      value: userDateStr,
-                      onChange: (e) => setUserDateStr(e.target.value),
-                      className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:outline-none focus:border-blue-500 transition-colors"
-                    })
-                  ),
-                  React.createElement('div', null,
-                    React.createElement('label', { className: "block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2" }, "Project Type"),
-                    React.createElement('div', { className: "grid grid-cols-2 sm:grid-cols-3 gap-3" },
-                      PROJECT_TYPES.map(type => 
-                        React.createElement('button', {
-                          key: type.id,
-                          onClick: () => setSelectedType(type.id),
-                          className: `p-3 rounded-xl border flex items-center gap-2 transition-all ${selectedType === type.id ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-slate-950 border-slate-800 hover:border-slate-700'}`
-                        },
-                          React.createElement('span', { className: "text-xs font-bold truncate" }, type.label)
-                        )
-                      )
-                    )
-                  )
-                )
-              ),
+
               error && React.createElement('div', { className: "bg-rose-500/10 border border-rose-500/20 text-rose-400 p-3 rounded-xl flex items-center gap-2 text-sm" }, 
                 "⚠",
                 error
-              ),
-              React.createElement('div', { className: "pt-4 flex flex-col gap-3" },
-                userProjects.length > 0 && React.createElement('button', {
-                  onClick: handleStartWithProject,
-                  disabled: !selectedProjectId || loading,
-                  className: "w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900 disabled:opacity-50 text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20"
-                }, loading ? "Analyzing..." : "Analyze Selected Project"),
-                React.createElement('div', { className: "flex gap-3" },
-                  React.createElement('button', {
-                    onClick: () => { setUserDateStr(''); handleStart(); },
-                    className: "flex-1 py-4 rounded-xl font-bold border border-slate-700 hover:bg-slate-800 transition-colors"
-                  }, "Skip & Analyze"),
-                  React.createElement('button', {
-                    onClick: handleStart,
-                    className: "flex-[2] bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-900/20"
-                  }, "Analyze Queue")
-                )
               )
             )
           )
@@ -300,55 +224,59 @@
         React.createElement('div', { className: "max-w-5xl mx-auto space-y-6" },
           React.createElement('header', { className: "flex flex-wrap items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-4" },
             React.createElement('div', { className: "flex items-center gap-4" },
-              React.createElement('button', { onClick: () => setView('setup'), className: "p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors" }, "↶ Back"),
+              React.createElement('button', { onClick: () => { setView('setup'); setSelectedProject(null); setQueueStats(null); setUserProjectStats(null); }, className: "p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors" }, "↶ Back"),
               React.createElement('div', null,
                 React.createElement('h1', { className: "text-xl font-black text-white flex items-center gap-2" },
-                  PROJECT_TYPES.find(t => t.id === selectedType)?.label,
-                  React.createElement('span', { className: "text-blue-500" }, "Stats")
+                  selectedProject?.title,
+                  React.createElement('span', { className: "text-blue-500 text-lg" }, "Analysis")
+                ),
+                React.createElement('p', { className: "text-xs text-slate-400 mt-1" },
+                  `${selectedProjectType?.charAt(0).toUpperCase() + selectedProjectType?.slice(1) || 'Project'} • Submitted ${new Date(selectedProject?.published).toLocaleDateString()}`
                 )
               )
-            ),
-            React.createElement('button', { onClick: fetchData, className: "bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-colors" }, "🔄 Refresh")
+            )
           ),
           error && React.createElement('div', { className: "bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl flex items-center gap-3" }, "⚠", error),
-          loading && !stats ? React.createElement('div', { className: "text-center py-20 animate-pulse text-slate-500 font-bold tracking-widest uppercase" }, "Crunching Modrinth API...") : stats ? React.createElement(React.Fragment, null,
+          loading && !queueStats ? React.createElement('div', { className: "text-center py-20 animate-pulse text-slate-500 font-bold tracking-widest uppercase" }, "Crunching Modrinth API...") : queueStats && userProjectStats ? React.createElement(React.Fragment, null,
             React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" },
               React.createElement('div', { className: "bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-hidden" },
-                React.createElement('p', { className: "text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 relative z-10" }, "Avg Processing Time"),
+                React.createElement('div', { className: "absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent opacity-30" }),
+                React.createElement('p', { className: "text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 relative z-10" }, "Avg Queue Time"),
                 React.createElement('div', { className: "text-5xl font-black text-white relative z-10" },
-                  stats.avgWaitDays.toFixed(1),
-                  React.createElement('span', { className: "text-lg text-slate-500 ml-1" }, "d")
+                  queueStats.avgWaitDays.toFixed(1),
+                  React.createElement('span', { className: "text-lg text-slate-500 ml-1" }, "days")
                 ),
-                React.createElement('p', { className: "text-xs text-slate-400 mt-2 relative z-10" }, "Median wait time from upload to approval.")
+                React.createElement('p', { className: "text-xs text-slate-400 mt-2 relative z-10" }, "Median wait from submission to approval")
               ),
               React.createElement('div', { className: "bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-hidden" },
-                React.createElement('p', { className: "text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 relative z-10" }, "Current Backlog Lag"),
+                React.createElement('div', { className: "absolute inset-0 bg-gradient-to-br from-purple-500/10 to-transparent opacity-30" }),
+                React.createElement('p', { className: "text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 relative z-10" }, "Queue Position"),
                 React.createElement('div', { className: "text-5xl font-black text-white relative z-10" },
-                  stats.currentLagDays.toFixed(1),
-                  React.createElement('span', { className: "text-lg text-slate-500 ml-1" }, "d")
+                  userProjectStats.gapDays.toFixed(1),
+                  React.createElement('span', { className: "text-lg text-slate-500 ml-1" }, "days")
                 ),
-                React.createElement('p', { className: "text-xs text-slate-400 mt-2 relative z-10" }, "Current depth of the backlog queue.")
+                React.createElement('p', { className: "text-xs text-slate-400 mt-2 relative z-10" }, userProjectStats.gapDays <= 0 ? "Already past queue front!" : "Behind queue front")
               ),
-              stats.userStats && React.createElement('div', { className: `bg-slate-900 border rounded-3xl p-6 relative overflow-hidden ${stats.userStats.isPassed ? 'border-emerald-500/30' : 'border-blue-500/20'}`},
-                React.createElement('p', { className: "text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 relative z-10" }, "Your Estimated ETA"),
-                stats.userStats.isPassed ? React.createElement('div', null,
-                  React.createElement('div', { className: "text-3xl font-black text-emerald-400 leading-tight relative z-10" }, "Any Minute Now"),
-                  React.createElement('p', { className: "text-xs text-slate-400 mt-2 relative z-10" }, "The queue front has passed your submission date!")
+              React.createElement('div', { className: `bg-slate-900 border rounded-3xl p-6 relative overflow-hidden ${userProjectStats.isPassed ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-transparent' : 'border-orange-500/30 bg-gradient-to-br from-orange-500/5 to-transparent'}`},
+                React.createElement('p', { className: "text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 relative z-10" }, "Estimated Approval"),
+                userProjectStats.isPassed ? React.createElement('div', null,
+                  React.createElement('div', { className: "text-3xl font-black text-emerald-400 leading-tight relative z-10" }, "🎉 Any Minute!"),
+                  React.createElement('p', { className: "text-xs text-slate-400 mt-2 relative z-10" }, "The queue front has passed your submission!")
                 ) : React.createElement('div', null,
-                  React.createElement('div', { className: "text-3xl font-black text-blue-400 leading-tight relative z-10" }, stats.userStats.estimatedApproval.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })),
-                  React.createElement('p', { className: "text-xs text-slate-400 mt-2 relative z-10" }, `You are approx ${stats.userStats.gapDays.toFixed(1)} days behind the front of the queue.`)
+                  React.createElement('div', { className: "text-3xl font-black text-orange-400 leading-tight relative z-10" }, userProjectStats.estimatedApproval.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })),
+                  React.createElement('p', { className: "text-xs text-slate-400 mt-2 relative z-10" }, `Approximately ${userProjectStats.gapDays.toFixed(1)} days away`)
                 )
               )
             ),
             React.createElement('div', { className: "bg-slate-900 border border-slate-800 rounded-3xl p-6" },
-              React.createElement('h2', { className: "text-xs font-black uppercase tracking-widest text-slate-500 mb-4 border-b border-slate-800 pb-4" }, `Latest 20 Approvals (${PROJECT_TYPES.find(t => t.id === selectedType)?.label})`),
+              React.createElement('h2', { className: "text-xs font-black uppercase tracking-widest text-slate-500 mb-4 border-b border-slate-800 pb-4" }, `Latest Approved Projects (${selectedProjectType?.charAt(0).toUpperCase() + selectedProjectType?.slice(1)})`),
               React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 gap-3" },
-                projects.map((p, idx) => 
-                  React.createElement('div', { key: idx, className: "bg-slate-950 border border-slate-800 p-4 rounded-xl flex justify-between items-center" },
+                queueStats.allProjects.slice(0, 20).map((p, idx) => 
+                  React.createElement('div', { key: idx, className: "bg-slate-950 border border-slate-800 p-4 rounded-xl flex justify-between items-center hover:border-slate-700 transition-colors" },
                     React.createElement('div', { className: "min-w-0 pr-4" },
                       React.createElement('h4', { className: "text-sm font-bold text-white truncate" }, p.title),
-                      React.createElement('div', { className: "text-[10px] text-slate-500 font-mono mt-1 flex gap-2" },
-                        React.createElement('span', null, `Queued: ${p.queued.toLocaleDateString()}`)
+                      React.createElement('div', { className: "text-[10px] text-slate-500 font-mono mt-1" },
+                        `${p.queued.toLocaleDateString()} → ${p.approved.toLocaleDateString()}`
                       )
                     ),
                     React.createElement('div', { className: "text-right shrink-0 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800" },
