@@ -49,23 +49,38 @@
         setLoadingProjects(true);
         setError(null);
         try {
-          const response = await fetch(`${API_BASE}/user/projects`, {
+          // First, get the authenticated user info
+          const userRes = await fetch(`${API_BASE}/user`, {
+            headers: {
+              'Authorization': apiKey
+            }
+          });
+
+          if (!userRes.ok) {
+            if (userRes.status === 401) {
+              throw new Error("Invalid API key. Please check your credentials.");
+            }
+            throw new Error("Failed to fetch user info");
+          }
+
+          const userData = await userRes.json();
+          const userId = userData.id;
+
+          // Now fetch user's projects
+          const response = await fetch(`${API_BASE}/user/${userId}/projects`, {
             headers: {
               'Authorization': apiKey
             }
           });
 
           if (!response.ok) {
-            if (response.status === 401) {
-              throw new Error("Invalid API key. Please check your credentials.");
-            }
             throw new Error("Failed to fetch projects");
           }
 
           const data = await response.json();
           
-          // Filter for pending projects
-          const pendingProjects = data.filter(p => p.status === 'processing');
+          // Filter for pending projects (status === 'processing' or 'rejected' or 'draft')
+          const pendingProjects = data.filter(p => p.status !== 'approved' && p.status !== 'published');
           
           if (pendingProjects.length === 0) {
             setError("No pending projects found. All your projects have been approved!");
